@@ -2,6 +2,48 @@
 
 > Used by me (@vykhovanets) and people in my teams for at least 5 months already. Previously was in a form of Claude Code memory provider, now formulated as a plugin for Hermes. Distinction: memorizing and remembering happens in a background.
 
+## Components
+
+| Component | Receives | Produces |
+|-----------|----------|----------|
+| **Saver** | Buffered user/assistant exchanges, the previous rolling summary, a catalog of memory pages, and the store/engine/schema paths. | Durable facts written to Markdown pages, followed by reconciliation of `now.md`. It is a separate agent with search, read, patch, and terminal tools. |
+| **Retriever** | The current user message, a catalog of page paths and descriptions, and the paths injected during the last three turns. | Up to three relevant page paths. The plugin reads those pages from disk and supplies their bodies to the main agent before it answers. The retriever does not receive the rolling summary or the full conversation. |
+| **Summariser** | The previous rolling summary and excerpts of the exchanges just processed by the saver. | An updated session summary, capped at 5,000 characters, for the next saver run. It is working context, not a wiki page. |
+
+Each component can use its own model through `auxiliary.saver`, `auxiliary.retriever`, or
+`auxiliary.summarizer`. The saver is an agent that can use tools; the retriever and summariser
+are single model calls without tools.
+
+## Logic and cadence
+
+1. **At session start**, the plugin loads the store's base/project context into a stable
+   system-prompt block and builds the page catalog.
+2. **Before an answer**, the retriever selects pages for the current user message. Their
+   bodies are added to the main agent's context. Retrieval participates in the answer path;
+   it is not a save job that runs after the answer.
+3. **After a completed user/assistant exchange**, Hermes queues memory synchronization on
+   its background worker. Stack adds that exchange to its buffer.
+4. **Every four exchanges by default**, the saver processes the buffered conversation
+   excerpts together with the previous rolling summary. It searches existing memory before
+   creating or editing pages, then uses a second turn in the same agent session to reconcile
+   `now.md`. Its instructions make the conversation excerpts the source of new facts; the
+   summary provides context only. A run may legitimately save nothing.
+5. **After the saver finishes**, the summariser updates the rolling summary from that same
+   batch. The buffer is cleared; the updated summary goes to the next saver run, not to the
+   retriever or the main agent.
+
+`auxiliary.saver.cadence` changes the interval; it counts completed exchanges, not individual
+messages, tool calls, or minutes. Pending exchanges are also processed at session end and
+before context compression, so a short session need not reach the normal cadence.
+`auxiliary.saver.max_iterations` separately limits the saver agent's work; it does not change
+when saving starts.
+
+Saving and summarising run on the background synchronization path. On a session switch, the
+buffer, rolling summary, cadence counter, and recent-injection history are reset.
+
+
+---
+
 A [Hermes](https://github.com/NousResearch/hermes-agent) memory-provider plugin for **stack** — a
 git-backed markdown memory store that an agent maintains and reads.
 
