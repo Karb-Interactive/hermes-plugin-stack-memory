@@ -1,5 +1,7 @@
 # hermes-plugin-stack-memory
 
+> Used by me (@vykhovanets) and people in my teams for at least 5 months already. Previously was in a form of Claude Code memory provider, now formulated as a plugin for Hermes. Distinction: memorizing and remembering happens in a background.
+
 A [Hermes](https://github.com/NousResearch/hermes-agent) memory-provider plugin for **stack** — a
 git-backed markdown memory store that an agent maintains and reads.
 
