@@ -176,6 +176,31 @@ An empty store is a healthy store — a freshly created one has no orgs configur
 It fills in as you work. To back it up, push it: it is an ordinary git repository, and a local-only
 one with no remote is legal.
 
+## Data and permissions
+
+- **Model calls:** the retriever sends the current message and page catalog to its configured
+  model. The saver receives buffered conversation excerpts, a rolling summary, store paths,
+  and the catalog; pages it reads become part of that agent's context. The summariser receives
+  conversation excerpts and the previous summary. Selected memory pages also reach the main
+  conversation model. With a remote provider, those inputs leave the machine for that provider.
+- **Local access:** the plugin reads and writes the selected store and can inspect configured
+  project paths for source-anchor verification. The background saver has search, read, patch,
+  and terminal tools under the Hermes process's permissions; its instructions are not a
+  filesystem sandbox.
+- **Shell and Git:** the plugin invokes its engine through `uv run`, and runs Git operations.
+  Shared submodules are pulled in the background at session start by default. The saver is
+  instructed to pull, commit, and push changed memory repositories using configured Git
+  credentials and remotes. Configure those remotes for the intended audience; the plugin does
+  not make a remote private or approve its contents for publication.
+- **Local diagnostics:** `$HERMES_HOME/memories/.stack-provider/dataset.jsonl` records query
+  excerpts, raw buffered exchanges, rolling summaries, tool traces, and project paths/commit
+  references. Treat it and probe logs as private conversation data. Stack does not upload
+  those logs to a separate analytics service or include an outbound telemetry endpoint.
+- **Credentials and background work:** model credentials are resolved from Hermes's configured
+  runtime; Git uses the user's existing authentication. Stack does not provide a separate
+  credential store. Saving and summarising run on Hermes's background worker, not as a separate
+  always-on service; an explicitly configured submodule-pull cron requires a running gateway.
+
 ## What it writes
 
 Writes happen only through the saver, and only in the store's own schema:
