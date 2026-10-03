@@ -1,0 +1,180 @@
+# hermes-plugin-stack-memory
+
+A [Hermes](https://github.com/NousResearch/hermes-agent) memory-provider plugin for **stack** — a
+git-backed markdown memory store that an agent maintains and reads.
+
+The plugin is self-contained: it ships the engine, the schema, and the writer. A memory store
+contains only data. That separation is the point — it means one plugin can serve any number of
+stores, a store can be created from nothing, and the plugin contains no personal content.
+
+```
+plugin (this repo)          ->  engine + schema + saver + prompts   (program, publishable)
+<memory store>  (any path)  ->  wiki/ + config.json + git history    (data, private)
+```
+
+## Install
+
+```sh
+git clone https://github.com/<your-org>/hermes-plugin-stack-memory   # or:
+hermes plugins install <your-org>/hermes-plugin-stack-memory --enable
+
+hermes config set memory.provider stack
+hermes gateway restart
+```
+
+Then use Hermes. **On first run the plugin creates its own store** at
+`$HERMES_HOME/memories/stack`, commits it, and reports the path. Nothing else to configure —
+a fresh install needs no pre-existing repository.
+
+Each Hermes profile installs the plugin itself (plugins are not copied by `hermes profile
+create --clone`), and each profile gets its own store by default.
+
+### Using an existing store
+
+To point a profile at a store you already have, or to share one store between profiles:
+
+```sh
+echo '{"repo_path": "/absolute/path/to/store"}' > "$HERMES_HOME/stack.json"
+```
+
+`stack.json` lives inside `HERMES_HOME`, so it is per profile. Resolution order:
+
+```
+real profile  ->  stack.json.repo_path  ->  $HERMES_HOME/memories/stack   (created on first use)
+no profile    ->  STACK_REPO            ->  ~/stack-memory            (tests/scripts only)
+```
+
+An inherited `STACK_REPO` is deliberately ignored when a real profile exists — otherwise a fresh
+profile would silently read and write the default profile's memory.
+
+### Pin a version
+
+```sh
+hermes plugins install <your-org>/hermes-plugin-stack-memory --ref <40-char-sha>
+```
+
+## Configuration
+
+Everything the plugin reads. Config keys with no default are inactive until you set them — the
+plugin falls back to the behaviour named in the last column.
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `memory.provider` | `""` | Selects this provider. Must be `stack`; with `""` the plugin never loads and Hermes uses builtin memory alone. |
+| `stack.json` → `repo_path` | profile-local | Which store this profile reads and writes. Absent ⇒ `$HERMES_HOME/memories/stack`; an absolute path shares one store between profiles. Written into `HERMES_HOME`, so it is per profile. |
+| `auxiliary.retriever.{provider,model,api_key,base_url}` | main model | Model for the per-turn recall call (one `PluginLlm` request over the page catalog). Needs the two trust flags below. |
+| `auxiliary.saver.{provider,model,api_key,base_url}` | main model | Model for the background curation agent — the hardest job here, so it is worth a strong one. It runs as its own agent rather than through `PluginLlm`, so it needs no trust flag. |
+| `auxiliary.summarizer.{…}` | main model | Model that compresses the rolling context the saver receives. Context only; never written to the store. Needs the same two trust flags as the retriever. |
+| `auxiliary.saver.cadence` | `4` | Turns between saver runs. Lower = more frequent, more tokens per session. |
+| `auxiliary.saver.max_iterations` | `10` | Tool-call budget for one saver run. A session with four or more new facts can exhaust the default mid-write, leaving created-but-empty pages and no commit — raise it before blaming the saver. |
+| `plugins.entries.stack.llm.allow_provider_override` | `false` | **Required for the retriever and summarizer.** Without it `PluginLlm` denies the request and raises; both callers swallow the error, so recall quietly returns nothing — indistinguishable from "no page was relevant" — and the summary freezes at its previous value. The saver is unaffected. |
+| `plugins.entries.stack.llm.allow_model_override` | `false` | The same gate for the model field specifically. Both must be true. |
+
+```sh
+hermes config set memory.provider stack
+
+# a cheaper model for recall, a stronger one for curation
+hermes config set auxiliary.retriever.provider ollama-cloud
+hermes config set auxiliary.retriever.model nemotron-3-super
+hermes config set auxiliary.saver.provider ollama-cloud
+hermes config set auxiliary.saver.model glm-5.3-flash
+hermes config set auxiliary.saver.cadence 4
+hermes config set auxiliary.saver.max_iterations 20
+
+# without these two, the retriever and summarizer settings above are ignored
+# (the saver does not go through PluginLlm, so it needs no flag)
+hermes config set plugins.entries.stack.llm.allow_provider_override true
+hermes config set plugins.entries.stack.llm.allow_model_override true
+```
+
+Config is read once at agent init, so **a new session is required** — `/reset` or restart.
+
+`hermes config set` handles these dotted paths, but warns that `auxiliary.saver.cadence`,
+`auxiliary.saver.max_iterations` and the rest are not recognized config keys — they are read by this
+plugin, not by Hermes core. The warning is expected; the value is written and used.
+
+Not read: the `timeout` field under any of the three `auxiliary.*` blocks. The plugin passes no
+timeout to either path, so setting it does nothing — the recall call can block for as long as the
+model takes, and the provider's own callers have no ceiling to fall back on.
+
+## Usage
+
+```sh
+hermes gateway restart     # after installing, or after any change to the config above
+```
+
+Then use Hermes normally. Four things happen without you asking:
+
+- **At session start** the store is located, its context (`now.md`, `user.md`, the index) is injected
+  once as a stable system-prompt block, and shared submodules are pulled in the background. The
+  block is byte-stable for the whole session, so it is served from the prompt cache instead of
+  re-sent every turn.
+- **Every turn**, the retriever makes one model call: it classifies the message and picks at most
+  three pages from the catalog, and their current bodies are injected. Pages injected in the last
+  three turns are filtered out in code, not by asking the model to remember. It fails open — a
+  failed or denied call injects nothing and the turn proceeds. That silence is the whole failure
+  mode, so check the trust flags above first if recall never seems to fire.
+- **Every `cadence` turns** — and also at session end if a shorter session still has buffered turns,
+  and before context compression discards messages — a bounded saver agent runs. It searches for an
+  existing page before writing, edits what it finds, and commits. Progress shows up as
+  `📥 Memory: injected …` and `📝 Memory: saved …` in the desktop app.
+- **Nothing is written by the main agent.** `get_tool_schemas()` returns `[]`, so the conversation
+  pays no schema cost for a tool it would only misuse — the saver owns every write.
+
+Maintenance, any time — from anywhere, naming the store explicitly:
+
+```sh
+uv run --no-project engine.py --repo ~/System/stack check     # dangling links, orphans
+uv run --no-project engine.py --repo ~/System/stack doctor    # config, git, submodules
+```
+
+An empty store is a healthy store — a freshly created one has no orgs configured and no pages.
+It fills in as you work. To back it up, push it: it is an ordinary git repository, and a local-only
+one with no remote is legal.
+
+## What it writes
+
+Writes happen only through the saver, and only in the store's own schema:
+
+- **Write-through consolidation:** every saver run gets two turns in one session — save durable
+  knowledge, then reconcile `now.md`. Completed outcomes move to their own page; `now.md` keeps
+  only unresolved state plus a pointer. DONE/MERGED/SHIPPED history, commits and PR numbers are
+  excluded.
+- **Two memory lanes:** Hermes builtin memory stays enabled for native persona curation. The stack
+  provider writes only stack; the builtin background reviewer never writes stack. Neither
+  duplicates the other.
+
+## The engine
+
+`engine.py` is the single runtime and is harness-neutral — no Hermes imports. It takes the store
+explicitly and never infers it from its own location:
+
+```sh
+uv run --no-project engine.py --repo <store> load    [cwd]   # context + page catalog
+uv run --no-project engine.py --repo <store> check   [cwd]   # health: verify-all, dangling links, orphans
+uv run --no-project engine.py --repo <store> create  ...     # write a page (stages; does not commit)
+uv run --no-project engine.py --repo <store> doctor          # config, git state, submodules
+uv run --no-project engine.py --repo <store> init            # create a minimal store at an absent path
+```
+
+Any other harness can use it by calling that path — it does not need to be copied into a store.
+
+## Develop
+
+- Debug: `STACK_PROVIDER_DEBUG=1` logs lifecycle seams to `.probe.log`.
+- Tests:
+  ```sh
+  PYTHONPATH=$HOME/.hermes/hermes-agent:$HOME/.hermes/plugins \
+    uv run --project $HOME/.hermes/hermes-agent --no-sync \
+    python -m unittest discover -s tests -p 'test_*.py'
+  ```
+  `tests/test_vocab.py` also runs standalone (it asserts prompt vocabulary, not discover-style tests).
+- `tests/check_profile_store.py` exercises fresh-profile and explicit-store resolution with real
+  objects against temp `HERMES_HOME`s.
+- Current behaviour is defined by the code and its tests. There is no separate spec document in the
+  tree: an earlier v1 build spec was deleted once it stopped describing this system, and Git holds
+  its history.
+
+## Requirements
+
+`uv` and `git` on PATH. No API key, no pip dependencies beyond the engine's PEP 723 `pyyaml`.

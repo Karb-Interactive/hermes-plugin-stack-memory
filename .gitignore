@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+
+# Runtime state never lives in the plugin checkout. The dataset and probe log
+# are profile state ($HERMES_HOME/memories/.stack-provider/, $HERMES_HOME/logs/).
+# These entries remain only so a stray local write can never be committed.
+.probe.log
+eval/
+stack.json
