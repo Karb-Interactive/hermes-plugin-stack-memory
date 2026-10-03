@@ -2,6 +2,40 @@
 
 > Used by me (@vykhovanets) and people in my teams for at least 5 months already. Previously was in a form of Claude Code memory provider, now formulated as a plugin for Hermes. Distinction: memorizing and remembering happens in a background.
 
+> Each profile can have its own memory store.
+
+## Basic installation: a personal wiki
+
+```sh
+hermes plugins install Karb-Interactive/hermes-plugin-stack-memory --enable
+hermes config set memory.provider stack
+```
+
+Start a new chat in Hermes Desktop, or run `hermes chat` in the CLI. Stack creates the wiki
+at the profile's default `$HERMES_HOME/memories/stack` path on first use — normally
+`~/.hermes/memories/stack` for the default profile, or
+`~/.hermes/profiles/<profile>/memories/stack` for a named profile.
+
+**No organization, project, custom store path, or Git remote is required.** The store starts
+with personal pages for current priorities, preferences, and user facts. Leave `repo_path`
+unset to use this default; organization/project mappings and shared repositories are optional
+additions later. A pre-existing `stack.json.repo_path` override still selects that other store.
+With no auxiliary model overrides, the components use your configured main model.
+Already have a wiki? [Link this profile to an existing store](#using-an-existing-store).
+
+To create a separate named profile with its own store:
+
+```sh
+hermes profile create notes
+hermes -p notes plugins install Karb-Interactive/hermes-plugin-stack-memory --enable
+hermes -p notes config set memory.provider stack
+hermes -p notes chat
+```
+
+Here `notes` is an example profile name, not an organization. No gateway service is needed
+for Desktop or CLI use. `uv`, `git`, and a configured Git name/email are needed for the store's
+initial commit.
+
 ## Components
 
 | Component | Receives | Produces |
@@ -59,8 +93,8 @@ plugin (this repo)          ->  engine + schema + saver + prompts   (program, pu
 ## Install
 
 ```sh
-git clone https://github.com/<your-org>/hermes-plugin-stack-memory   # or:
-hermes plugins install <your-org>/hermes-plugin-stack-memory --enable
+git clone https://github.com/Karb-Interactive/hermes-plugin-stack-memory   # or:
+hermes plugins install Karb-Interactive/hermes-plugin-stack-memory --enable
 
 hermes config set memory.provider stack
 hermes gateway restart
@@ -75,13 +109,37 @@ create --clone`), and each profile gets its own store by default.
 
 ### Using an existing store
 
-To point a profile at a store you already have, or to share one store between profiles:
+You can point a profile at a compatible Stack wiki you already have instead of creating a
+new one. After installing the plugin, run the interactive setup:
 
 ```sh
-echo '{"repo_path": "/absolute/path/to/store"}' > "$HERMES_HOME/stack.json"
+hermes memory setup
 ```
 
-`stack.json` lives inside `HERMES_HOME`, so it is per profile. Resolution order:
+Choose **stack**, then enter the existing store's absolute path when asked for the store path.
+Use the repository root that contains `wiki/`, **not** the `wiki/` directory itself. The wizard
+selects Stack as the memory provider and saves `repo_path` in that profile's `stack.json`.
+
+For a named profile with the plugin already installed:
+
+```sh
+hermes -p notes memory setup
+```
+
+Then start a new chat in that profile. Future memory reads and writes use the existing store;
+linking it does not copy or move its pages, or merge a previous profile-local store into it.
+Pointing multiple profiles at the same path shares that memory between them.
+
+The binding is per profile: normally `~/.hermes/stack.json` for the default profile or
+`~/.hermes/profiles/notes/stack.json` for `notes`. For an explicit `HERMES_HOME`, it is
+`$HERMES_HOME/stack.json`. Its store-path setting is:
+
+```json
+{"repo_path": "/absolute/path/to/store"}
+```
+
+No organization/project mapping is required to link an existing personal store. Resolution
+order:
 
 ```
 real profile  ->  stack.json.repo_path  ->  $HERMES_HOME/memories/stack   (created on first use)
@@ -91,10 +149,23 @@ no profile    ->  STACK_REPO            ->  ~/stack-memory            (tests/scr
 An inherited `STACK_REPO` is deliberately ignored when a real profile exists — otherwise a fresh
 profile would silently read and write the default profile's memory.
 
+### Optional folder mapping
+
+The store's `config.json` maps its organization/project keys to local project folders, so
+Stack can select project context from the current working directory and resolve source
+anchors. It is optional for a personal wiki. To configure it, copy `config.example.json`
+to `config.json` inside the store and fill in the project paths; `~` and `$HOME` are supported.
+New stores ignore this machine-local file in Git.
+
+**When migrating between machines with different folder layouts, recreate or update those
+paths on the destination.** The wiki pages can stay unchanged, but incorrect mappings can
+prevent automatic project-context loading; personal memory still works. This is separate
+from the profile's `stack.json`, which selects the memory store itself.
+
 ### Pin a version
 
 ```sh
-hermes plugins install <your-org>/hermes-plugin-stack-memory --ref <40-char-sha>
+hermes plugins install Karb-Interactive/hermes-plugin-stack-memory --ref <40-char-sha>
 ```
 
 ## Configuration
