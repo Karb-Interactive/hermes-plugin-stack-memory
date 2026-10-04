@@ -271,9 +271,7 @@ one with no remote is legal.
 - **Credentials and background work:** model credentials are resolved from Hermes's configured
   runtime; Git uses the user's existing authentication. Stack does not provide a separate
   credential store. Saving and summarising run on Hermes's background worker, not as a separate
-  always-on service. Opting into `pull_cron` writes `$HERMES_HOME/scripts/stack_pull.sh` and
-  registers a `stack-pull` cron job, which requires a running gateway. Stack implements no
-  cleanup for those artifacts; remove the job and script explicitly when no longer needed.
+  always-on service.
 
 ## What it writes
 

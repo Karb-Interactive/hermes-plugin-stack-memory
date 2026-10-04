@@ -44,7 +44,6 @@ import json
 import logging
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import threading
@@ -407,11 +406,8 @@ class StackMemoryProvider(MemoryProvider):
             self._summarizer = Summarizer(
                 provider=provider, model=model,
             )
-        # Shared-submodule freshness — exactly one mechanism, auto-selected:
-        if self._pull_cron_schedule():
-            self._ensure_pull_cron()       # opt-in scheduled pull (needs a running gateway daemon)
-        else:
-            self._pull_submodules_async()  # default: gateway-free background pull at session start
+        # Shared-submodule freshness: gateway-free background pull at session start.
+        self._pull_submodules_async()
         _probe(f"initialize block_chars={len(self._prompt_block)}")
 
     def system_prompt_block(self) -> str:
@@ -631,23 +627,6 @@ class StackMemoryProvider(MemoryProvider):
     def _wiki_dir(self) -> Path:
         return self._repo / "wiki"
 
-    def _pull_cron_schedule(self) -> str:
-        """Schedule for the submodule-pull cron, from env STACK_PULL_CRON or stack.json `pull_cron`
-        (e.g. 'every 20m'). Empty = no cron (opt-in)."""
-        env = os.environ.get("STACK_PULL_CRON", "").strip()
-        if env:
-            return env
-        if self._hermes_home:
-            try:
-                p = Path(self._hermes_home) / "stack.json"
-                if p.exists():
-                    v = json.loads(p.read_text(encoding="utf-8")).get("pull_cron")
-                    if v:
-                        return str(v).strip()
-            except Exception:
-                pass
-        return ""
-
     def _pull_submodules_async(self) -> None:
         """Gateway-free freshness (the default): pull EVERY submodule in a background daemon thread —
         best-effort, timeout-guarded, non-blocking (session start isn't delayed). Fully contained in
@@ -672,43 +651,6 @@ class StackMemoryProvider(MemoryProvider):
             threading.Thread(target=_run, daemon=True, name="stack-submodule-pull").start()
         except Exception as e:
             _probe(f"_pull_submodules_async spawn error: {e}")
-
-    def _ensure_pull_cron(self) -> None:
-        """Self-register (idempotent, primary-only) a no_agent cron that `git submodule foreach pull`s
-        EVERY submodule, keeping the shared wiki fresh. Opt-in via `pull_cron`. Needs a running gateway
-        to actually fire (`hermes gateway`). Never raises out of initialize."""
-        schedule = self._pull_cron_schedule()
-        if not schedule or self._agent_context != "primary":
-            return
-        try:
-            from cron.jobs import create_job, list_jobs
-        except Exception:
-            _probe("cron jobs API unavailable; skipping pull-cron register")
-            return
-        JOB = "stack-pull"
-        try:
-            scripts = Path(self._hermes_home or os.path.expanduser("~/.hermes")) / "scripts"
-            scripts.mkdir(parents=True, exist_ok=True)
-            script = scripts / "stack_pull.sh"
-            # Rewrite each init so the baked-in repo path stays current. `no_agent` script cwd is the
-            # scripts dir (verified), so use `git -C <abs repo>`. Each pull is best-effort.
-            script.write_text(
-                "#!/usr/bin/env bash\n"
-                f"git -C {shlex.quote(str(self._repo))} submodule foreach 'git pull --ff-only || true' || true\n",
-                encoding="utf-8",
-            )
-            try:
-                script.chmod(0o755)
-            except Exception:
-                pass
-            existing = [j for j in list_jobs(include_disabled=True) if j.get("name") == JOB]
-            if existing:
-                _probe(f"pull-cron '{JOB}' already registered ({len(existing)}); to change cadence remove it")
-                return
-            create_job(None, schedule, name=JOB, no_agent=True, script="stack_pull.sh", deliver="local")
-            _probe(f"registered pull-cron '{JOB}' schedule={schedule!r}")
-        except Exception as e:
-            _probe(f"_ensure_pull_cron error: {e}")
 
     def _build_index(self) -> None:
         self._index = []
