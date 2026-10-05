@@ -177,6 +177,7 @@ plugin falls back to the behaviour named in the last column.
 |-----|---------|--------|
 | `memory.provider` | `""` | Selects this provider. Must be `stack`; with `""` the plugin never loads and Hermes uses builtin memory alone. |
 | `stack.json` → `repo_path` | profile-local | Which store this profile reads and writes. Absent ⇒ `$HERMES_HOME/memories/stack`; an absolute path shares one store between profiles. Written into `HERMES_HOME`, so it is per profile. |
+| `stack.json` → `dataset_enabled` | `false` | When true, writes the local debug/dataset file (see Data and permissions). Off by default; it stores raw conversation turns. Set via `hermes memory setup`. |
 | `auxiliary.retriever.{provider,model,api_key,base_url}` | main model | Model for the per-turn recall call (one `PluginLlm` request over the page catalog). Needs the two trust flags below. |
 | `auxiliary.saver.{provider,model,api_key,base_url}` | main model | Model for the background curation agent — the hardest job here, so it is worth a strong one. It runs as its own agent rather than through `PluginLlm`, so it needs no trust flag. |
 | `auxiliary.summarizer.{…}` | main model | Model that compresses the rolling context the saver receives. Context only; never written to the store. Needs the same two trust flags as the retriever. |
@@ -264,8 +265,9 @@ one with no remote is legal.
   instructed to pull, commit, and push changed memory repositories using configured Git
   credentials and remotes. Configure those remotes for the intended audience; the plugin does
   not make a remote private or approve its contents for publication.
-- **Local diagnostics (opt-in):** when `auxiliary.dataset.enabled: true` is set, the plugin
-  writes `$HERMES_HOME/memories/.stack-provider/dataset.jsonl` — a debug/dataset file holding
+- **Local diagnostics (opt-in):** when `dataset_enabled` is true in this profile's `stack.json`
+  (the same file as `repo_path`, set by `hermes memory setup`), the plugin writes
+  `$HERMES_HOME/memories/.stack-provider/dataset.jsonl` — a debug/dataset file holding
   query excerpts, full raw conversation turns fed to the saver, rolling summaries, tool calls
   and their results, and project paths/commit references. It is off by default because it
   stores raw transcripts; it has no size cap or rotation. Treat it and probe logs as private

@@ -199,17 +199,35 @@ class StackMemoryProvider(MemoryProvider):
                 "secret": False,
                 "required": False,
                 "default": "",
-            }
+            },
+            {
+                "key": "dataset_enabled",
+                "description": (
+                    "Write a local debug/dataset file recording saver runs, including "
+                    "raw conversation turns and tool traces. Off by default: it stores "
+                    "full transcripts, is not uploaded anywhere, and can get large."
+                ),
+                "secret": False,
+                "required": False,
+                "default": False,
+                "type": "boolean",
+            },
         ]
 
     def save_config(self, values: Dict[str, Any], hermes_home: str) -> None:
-        rp = values.get("repo_path")
-        if not rp:
-            return
+        cfg_path = Path(hermes_home) / "stack.json"
         try:
-            (Path(hermes_home) / "stack.json").write_text(
-                json.dumps({"repo_path": rp}, indent=2), encoding="utf-8"
-            )
+            existing = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+        except Exception:
+            existing = {}
+        if not isinstance(existing, dict):
+            existing = {}
+        if "repo_path" in values and values["repo_path"]:
+            existing["repo_path"] = values["repo_path"]
+        if "dataset_enabled" in values:
+            existing["dataset_enabled"] = bool(values["dataset_enabled"])
+        try:
+            cfg_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
         except Exception:
             pass
 
@@ -349,7 +367,7 @@ class StackMemoryProvider(MemoryProvider):
         # writing it here would share one file across profiles sharing this
         # install, and dirty the installed source.
         self._dataset = None
-        if self._resolve_aux_bool("dataset", "enabled", default=False):
+        if self._dataset_enabled():
             from .dataset import DatasetLogger
             _state_dir = Path(self._hermes_home or os.path.expanduser("~/.hermes"))
             self._dataset = DatasetLogger(
@@ -757,25 +775,13 @@ class StackMemoryProvider(MemoryProvider):
             pass
         return default
 
-    @staticmethod
-    def _resolve_aux_bool(config_key: str, field: str, *, default: bool) -> bool:
-        """Read a boolean from ``auxiliary.<config_key>.<field>``.
-
-        The dataset is a debug/dataset artefact that stores raw conversation
-        turns on disk, so it is opt-in: unset -> ``default`` (off). Only an
-        explicit boolean in the config turns it on; anything else is ignored.
-        """
+    def _dataset_enabled(self) -> bool:
+        """Whether the opt-in dataset writer is on, from this profile's stack.json."""
         try:
-            from hermes_cli.config import load_config
-            cfg = load_config()
-            aux = cfg.get("auxiliary", {}) if isinstance(cfg.get("auxiliary"), dict) else {}
-            task = aux.get(config_key, {}) if isinstance(aux.get(config_key), dict) else {}
-            value = task.get(field)
-            if isinstance(value, bool):
-                return value
+            cfg_path = Path(self._hermes_home or os.path.expanduser("~/.hermes")) / "stack.json"
+            return json.loads(cfg_path.read_text(encoding="utf-8")).get("dataset_enabled") is True
         except Exception:
-            pass
-        return default
+            return False
 
 
 def register(ctx) -> None:
