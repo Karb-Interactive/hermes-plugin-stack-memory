@@ -254,6 +254,14 @@ one with no remote is legal.
   and terminal tools under the Hermes process's permissions; its instructions are not a
   filesystem sandbox. Memory writes have no additional human-review step. The saver does not
   pass YOLO/skip-approval options or replace Hermes's approval guards.
+- **Saver terminal containment:** while the saver runs, a thread-scoped `pre_tool_call` guard
+  blocks a destructive command (`rm`, `mv`, `cp`, `chmod`, a `>`/`>>` redirect, `sed -i`, …)
+  that names an absolute path outside the store. That is the whole rule — it is deliberately
+  shape-independent and does not parse git targets, relative paths, `cd` state, or in-process
+  mutations, all of which fail open. Reads and executions stay open — the saver must inspect
+  project repos to verify anchors. It is a guard, not a sandbox: `python -c "shutil.rmtree(...)"`
+  and `find -delete` are not stopped. It reduces blast radius; it does not make the saver safe
+  against a determined injection. The store itself is the boundary, and git history is the undo.
 - **Shell and Git:** the plugin invokes its engine through `uv run`, and runs Git operations.
   Shared submodules are pulled in the background at session start by default. The saver is
   instructed to pull, commit, and push changed memory repositories using configured Git

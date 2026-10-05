@@ -90,12 +90,16 @@ class Saver:
                 set_thread_tool_whitelist,
                 clear_thread_tool_whitelist,
             )
+            from . import store_jail
         except ImportError:
             logger.debug("AIAgent not available (running outside Hermes)")
             return [], [], ""
 
         system_prompt = self._build_prompt()
         whitelist = {"search_files", "read_file", "patch", "terminal"}
+        # Confine this thread's terminal mutations to the store (git is the undo).
+        scratch = list(store_jail.SCRATCH) + [str(Path.home() / ".hermes" / "cache" / "scratch")]
+        store_jail.arm([self._store_path], scratch=scratch, engine_hint=str(self._engine_path))
 
         turns_text = format_turns(turns)
         user_message = SAVER_USER.format(
@@ -154,6 +158,7 @@ class Saver:
                     logger.warning("Saver prune pass failed: %s", e)
             finally:
                 clear_thread_tool_whitelist()
+                store_jail.disarm()
 
             # Extract what was saved from the agent's tool calls (both turns)
             saved = self._extract_saves(agent)

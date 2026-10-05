@@ -7,3 +7,4 @@ __pycache__/
 .probe.log
 eval/
 stack.json
+.pytest_cache/

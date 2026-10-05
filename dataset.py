@@ -7,7 +7,7 @@ saver, the rolling summary, every tool call and its result, and what was written
 Full turns and tool traces are stored on purpose — this is a DEBUG + DATASET
 artefact (to understand how the saver behaves, and to study it later), not a
 compact log. It therefore has NO size cap or rotation; it is opt-in
-(``dataset_enabled`` in this profile's ``stack.json``, default off) and lives in the profile's state
+(``memory.stack.dataset_enabled`` in this profile's ``config.yaml``, default off) and lives in the profile's state
 directory, never in the plugin checkout. It is local-only and not uploaded
 anywhere; anyone who turns it on should expect raw transcripts on disk and
 manage the file themselves.

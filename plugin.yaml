@@ -1,5 +1,7 @@
 name: stack
 version: 0.1.0
+provides_hooks:
+  - pre_tool_call
 description: >-
   Stack — self-contained git-backed markdown memory provider. Ships its own
   engine, schema, prompts and background saver; a memory store contains only

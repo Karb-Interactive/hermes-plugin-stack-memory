@@ -830,4 +830,9 @@ def register(ctx) -> None:
             ctx.register_auxiliary_task(key, display_name=display, description=desc)
         except Exception as e:
             _probe(f"register_auxiliary_task {key} failed: {e}")
+    try:
+        from .store_jail import check_terminal
+        ctx.register_hook("pre_tool_call", check_terminal)
+    except Exception as e:
+        _probe(f"register store_jail hook failed: {e}")
     ctx.register_memory_provider(StackMemoryProvider())
