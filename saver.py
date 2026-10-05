@@ -38,7 +38,7 @@ class Saver:
     """
 
     DEFAULT_CADENCE = 4  # turns between saver runs
-    DEFAULT_MAX_ITERATIONS = 10
+    DEFAULT_MAX_ITERATIONS = 18
 
     def __init__(
         self,

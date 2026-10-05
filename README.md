@@ -183,7 +183,7 @@ plugin falls back to the behaviour named in the last column.
 | `auxiliary.saver.{provider,model,api_key,base_url}` | main model | Model for the background curation agent — the hardest job here, so it is worth a strong one. It runs as its own `AIAgent`, not through `PluginLlm`. |
 | `auxiliary.summarizer.{…}` | main model | Model that compresses the rolling context the saver receives, via the `summarizer` slot. Context only; never written to the store. No trust flag needed. |
 | `memory.stack.cadence` | `4` | Exchanges between saver runs. Lower = more frequent, more tokens per session. Set via `hermes memory setup`. |
-| `memory.stack.max_iterations` | `10` | Tool-call budget for one saver run. A session with four or more new facts can exhaust the default mid-write, leaving created-but-empty pages and no commit — raise it before blaming the saver. |
+| `memory.stack.max_iterations` | `18` | Tool-call budget for one saver run. A fact-dense session can exhaust a smaller budget mid-write, leaving created-but-empty pages and no commit — raise it before blaming the saver. |
 
 ```sh
 hermes config set memory.provider stack
