@@ -90,25 +90,6 @@ def test_session_end_flushes_pending_turns():
     provider._run_saver.assert_called_once_with("session-old", trigger="on_session_end")
 
 
-def test_saver_cadence_reads_positive_auxiliary_config():
-    """The live saver cadence can be tuned without changing plugin source."""
-    config_pkg = types.ModuleType("hermes_cli")
-    config_pkg.__path__ = []
-    config_mod = types.ModuleType("hermes_cli.config")
-    setattr(config_mod, "load_config", lambda: {"auxiliary": {"saver": {"cadence": 3}}})
-
-    with patch.dict(sys.modules, {
-        "hermes_cli": config_pkg,
-        "hermes_cli.config": config_mod,
-    }):
-        provider = _M.StackMemoryProvider()
-        cadence = provider._resolve_aux_positive_int(
-            "saver", "cadence", default=4
-        )
-
-    assert cadence == 3
-
-
 def test_saver_uses_shared_instructions():
     """The saver prompt must contain the same canonical phrases as the guidance block."""
     from stack.saver import Saver

@@ -52,7 +52,7 @@ class Saver:
         api_key: str = None,
         base_url: str = None,
         api_mode: str = None,
-        max_iterations: int = None,
+        max_iterations: Optional[int] = None,
     ):
         self._wiki_path = wiki_path
         self._store_path = store_path

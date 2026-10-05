@@ -212,6 +212,30 @@ class StackMemoryProvider(MemoryProvider):
                 "default": False,
                 "type": "boolean",
             },
+            {
+                "key": "cadence",
+                "description": (
+                    "Completed exchanges between background saver runs. Lower means more "
+                    "frequent saves and more tokens per session. Blank uses the built-in default."
+                ),
+                "secret": False,
+                "required": False,
+                "default": 0,
+                "type": "integer",
+                "minimum": 0,
+            },
+            {
+                "key": "max_iterations",
+                "description": (
+                    "Tool-call budget for one saver run. Raise it if a fact-dense session "
+                    "exhausts the default mid-write. Blank uses the built-in default."
+                ),
+                "secret": False,
+                "required": False,
+                "default": 0,
+                "type": "integer",
+                "minimum": 0,
+            },
         ]
 
     def save_config(self, values: Dict[str, Any], hermes_home: str) -> None:
@@ -222,10 +246,13 @@ class StackMemoryProvider(MemoryProvider):
             existing = {}
         if not isinstance(existing, dict):
             existing = {}
-        if "repo_path" in values and values["repo_path"]:
+        if values.get("repo_path"):
             existing["repo_path"] = values["repo_path"]
         if "dataset_enabled" in values:
             existing["dataset_enabled"] = bool(values["dataset_enabled"])
+        for key in ("cadence", "max_iterations"):
+            if key in values:
+                existing[key] = values[key]
         try:
             cfg_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
         except Exception:
@@ -392,23 +419,11 @@ class StackMemoryProvider(MemoryProvider):
         self._clear_turns()
         self._turn_count = 0
         self._rolling_summary = ""
-        self._saver_cadence = self._resolve_aux_positive_int(
-            "saver", "cadence", default=Saver.DEFAULT_CADENCE
-        )
+        self._saver_cadence = (self._positive_int_setting("cadence", Saver.DEFAULT_CADENCE)
+                               or Saver.DEFAULT_CADENCE)
         if self._agent_context == "primary":
             provider, model, api_key, base_url, api_mode = self._resolve_aux_runtime("saver")
-            # Read max_iterations from config (default: 10, saver.py:DEFAULT_MAX_ITERATIONS)
-            max_iterations = None
-            try:
-                from hermes_cli.config import load_config
-                _cfg = load_config()
-                _aux = _cfg.get("auxiliary", {}) if isinstance(_cfg.get("auxiliary"), dict) else {}
-                _task = _aux.get("saver", {}) if isinstance(_aux.get("saver"), dict) else {}
-                _mi = _task.get("max_iterations")
-                if isinstance(_mi, (int, float)) and _mi > 0:
-                    max_iterations = int(_mi)
-            except Exception:
-                pass
+            max_iterations = self._positive_int_setting("max_iterations", None)
             catalog = self._build_catalog()
             self._saver = Saver(
                 wiki_path=self._wiki_dir(),
@@ -760,28 +775,30 @@ class StackMemoryProvider(MemoryProvider):
                 pass
         return (None, None, None, None, None)
 
-    @staticmethod
-    def _resolve_aux_positive_int(config_key: str, field: str, *, default: int) -> int:
-        """Read a positive integer from ``auxiliary.<config_key>.<field>``."""
-        try:
-            from hermes_cli.config import load_config
-            cfg = load_config()
-            aux = cfg.get("auxiliary", {}) if isinstance(cfg.get("auxiliary"), dict) else {}
-            task = aux.get(config_key, {}) if isinstance(aux.get(config_key), dict) else {}
-            value = task.get(field)
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
-                return int(value)
-        except Exception:
-            pass
+    def _positive_int_setting(self, key: str, default: Optional[int]) -> Optional[int]:
+        """A positive integer from this profile's stack.json, else *default*."""
+        value = self._stack_setting(key, None)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            return int(value)
         return default
 
     def _dataset_enabled(self) -> bool:
         """Whether the opt-in dataset writer is on, from this profile's stack.json."""
+        return self._stack_setting("dataset_enabled", False) is True
+
+    def _stack_setting(self, key: str, default: Any) -> Any:
+        """Read a non-secret plugin setting from this profile's stack.json.
+
+        repo_path is resolved separately (it locates the store); the provider's
+        other own settings — dataset_enabled, cadence, max_iterations — live in
+        the same file, written by ``hermes memory setup`` via get_config_schema().
+        """
         try:
             cfg_path = Path(self._hermes_home or os.path.expanduser("~/.hermes")) / "stack.json"
-            return json.loads(cfg_path.read_text(encoding="utf-8")).get("dataset_enabled") is True
+            value = json.loads(cfg_path.read_text(encoding="utf-8")).get(key)
+            return default if value is None else value
         except Exception:
-            return False
+            return default
 
 
 def register(ctx) -> None:
