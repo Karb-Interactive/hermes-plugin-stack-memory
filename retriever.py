@@ -53,14 +53,7 @@ class Retriever:
         Never raises — returns ([], []) on any failure.
         """
         recently_injected = recently_injected or set()
-        
-        # Check PluginLlm availability (preserves early-return behavior)
-        try:
-            from agent.plugin_llm import PluginLlm  # noqa: F401
-        except ImportError:
-            logger.debug("PluginLlm not available (running outside Hermes)")
-            return [], []
-        
+
         prompt = _RETRIEVER_PROMPT.format(
             catalog=self._catalog,
             injected=", ".join(sorted(recently_injected)) if recently_injected else "(none)",

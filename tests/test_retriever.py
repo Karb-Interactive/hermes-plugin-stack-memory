@@ -22,7 +22,6 @@ _here = Path(__file__).resolve().parent
 if str(_here.parent) not in sys.path:
     sys.path.insert(0, str(_here.parent))
 
-import stack
 from stack.retriever import Retriever, _RETRIEVER_PROMPT, _MAX_PAGES
 from stack.common import parse_path_response
 
@@ -134,9 +133,11 @@ class TestRetrieve(unittest.TestCase):
             return original_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=_blocked_import):
-            result = self.r.retrieve("help me debug this code")
+            paths, trace = self.r.retrieve("help me debug this code")
 
-        self.assertEqual(result, ([], []))
+        # No paths and no raise; the trace may carry an entry, but retrieval stays graceful.
+        self.assertEqual(paths, [])
+        self.assertIsInstance(trace, list)
 
     def test_returns_empty_when_pluginllm_raises(self):
         """Returns ([], trace) when PluginLlm.complete() raises an exception."""

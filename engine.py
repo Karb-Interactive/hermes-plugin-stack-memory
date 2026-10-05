@@ -613,11 +613,11 @@ def cmd_create(argv):
     Additive-only: if the page exists, returns an error — edit the file directly to update.
     Stages (git add) but does NOT commit — the model commits with its own message.
     """
-    import argparse, time as _time
+    import argparse
     p = argparse.ArgumentParser(prog="stack.py create", add_help=False)
     p.add_argument("--name", required=True)
     p.add_argument("--description", required=True)
-    p.add_argument("--content", default="", help="page body, or @file to read from a file (optional — if omitted, a stub is created; patch it afterward)")
+    p.add_argument("--content", default="", help="page body text (optional — if omitted, a stub is created; patch it afterward)")
     p.add_argument("--kind", default="reference",
                    choices=["note", "reference", "decision", "architecture",
                             "preference", "user", "learning"])

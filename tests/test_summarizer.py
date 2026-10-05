@@ -10,8 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 import unittest
-from unittest.mock import patch, MagicMock
-import stack
+from unittest.mock import patch
 from stack.summarizer import Summarizer, _SUMMARY_MAX
 from stack.common import format_turns
 
@@ -110,15 +109,14 @@ class TestCallLlmNotImportable(unittest.TestCase):
     """call_llm() returns '' when PluginLlm is not importable."""
 
     def test_returns_empty_string(self):
-        # In the Hermes environment, PluginLlm may be available — so this
-        # test only asserts the no-Hermes path. Skip if PluginLlm is importable.
-        try:
-            import agent.plugin_llm  # noqa: F401
+        # In the Hermes environment PluginLlm is importable — this test only
+        # asserts the no-Hermes path. Skip if it is available.
+        import importlib.util
+        if importlib.util.find_spec("agent.plugin_llm") is not None:
             self.skipTest("PluginLlm is available in this environment")
-        except ImportError:
-            from stack.common import call_llm
-            result = call_llm("test prompt")
-            self.assertEqual(result, "")
+        from stack.common import call_llm
+        result = call_llm("test prompt")
+        self.assertEqual(result, "")
 
 
 class TestUpdateTruncation(unittest.TestCase):

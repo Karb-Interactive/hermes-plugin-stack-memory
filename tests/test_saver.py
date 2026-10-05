@@ -22,7 +22,6 @@ _here = Path(__file__).resolve().parent
 if str(_here.parent) not in sys.path:
     sys.path.insert(0, str(_here.parent))
 
-import stack
 from stack.saver import Saver
 from stack.common import format_turns
 
