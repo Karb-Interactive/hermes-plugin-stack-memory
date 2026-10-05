@@ -239,24 +239,39 @@ class StackMemoryProvider(MemoryProvider):
         ]
 
     def save_config(self, values: Dict[str, Any], hermes_home: str) -> None:
-        cfg_path = Path(hermes_home) / "stack.json"
-        try:
-            existing = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
-        except Exception:
-            existing = {}
-        if not isinstance(existing, dict):
-            existing = {}
+        """Persist setup values.
+
+        repo_path stays in stack.json (it is the repo mapping that locates the
+        store and must be readable before config load). Every other provider
+        setting lands in config.yaml under ``memory.stack``, next to the
+        activation key — the same place other memory providers keep theirs.
+        """
+        settings = {k: values[k] for k in ("dataset_enabled", "cadence", "max_iterations")
+                    if k in values}
+        if settings:
+            try:
+                from hermes_cli.config import load_config, save_config
+                cfg = load_config()
+                if not isinstance(cfg.get("memory"), dict):
+                    cfg["memory"] = {}
+                prior = cfg["memory"].get("stack")
+                cfg["memory"]["stack"] = {**(prior if isinstance(prior, dict) else {}), **settings}
+                save_config(cfg)
+            except Exception:
+                pass
         if values.get("repo_path"):
+            cfg_path = Path(hermes_home) / "stack.json"
+            try:
+                existing = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+            except Exception:
+                existing = {}
+            if not isinstance(existing, dict):
+                existing = {}
             existing["repo_path"] = values["repo_path"]
-        if "dataset_enabled" in values:
-            existing["dataset_enabled"] = bool(values["dataset_enabled"])
-        for key in ("cadence", "max_iterations"):
-            if key in values:
-                existing[key] = values[key]
-        try:
-            cfg_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+            try:
+                cfg_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+            except Exception:
+                pass
 
     # -- core lifecycle ------------------------------------------------------
 
@@ -776,26 +791,33 @@ class StackMemoryProvider(MemoryProvider):
         return (None, None, None, None, None)
 
     def _positive_int_setting(self, key: str, default: Optional[int]) -> Optional[int]:
-        """A positive integer from this profile's stack.json, else *default*."""
-        value = self._stack_setting(key, None)
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
-            return int(value)
-        return default
+        """A positive integer from ``memory.stack.<key>``, else *default*.
 
-    def _dataset_enabled(self) -> bool:
-        """Whether the opt-in dataset writer is on, from this profile's stack.json."""
-        return self._stack_setting("dataset_enabled", False) is True
-
-    def _stack_setting(self, key: str, default: Any) -> Any:
-        """Read a non-secret plugin setting from this profile's stack.json.
-
-        repo_path is resolved separately (it locates the store); the provider's
-        other own settings — dataset_enabled, cadence, max_iterations — live in
-        the same file, written by ``hermes memory setup`` via get_config_schema().
+        Tolerant of a string value: ``hermes memory setup`` writes prompted
+        fields as strings, so "3" must read the same as 3.
         """
         try:
-            cfg_path = Path(self._hermes_home or os.path.expanduser("~/.hermes")) / "stack.json"
-            value = json.loads(cfg_path.read_text(encoding="utf-8")).get(key)
+            n = int(self._stack_setting(key, None))
+            return n if n > 0 else default
+        except (TypeError, ValueError):
+            return default
+
+    def _dataset_enabled(self) -> bool:
+        """Whether the opt-in dataset writer is on (``memory.stack.dataset_enabled``)."""
+        value = self._stack_setting("dataset_enabled", False)
+        return value is True or str(value).strip().lower() in ("1", "true", "yes", "on")
+
+    def _stack_setting(self, key: str, default: Any) -> Any:
+        """Read a provider setting from config.yaml under ``memory.stack``.
+
+        repo_path is resolved separately (it locates the store, from stack.json);
+        these settings live in config.yaml beside the activation key, written by
+        ``hermes memory setup`` via get_config_schema().
+        """
+        try:
+            from hermes_cli.config import load_config_readonly
+            block = (load_config_readonly().get("memory") or {}).get("stack") or {}
+            value = block.get(key)
             return default if value is None else value
         except Exception:
             return default

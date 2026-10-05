@@ -66,10 +66,10 @@ are single model calls without tools.
    batch. The buffer is cleared; the updated summary goes to the next saver run, not to the
    retriever or the main agent.
 
-`stack.json`'s `cadence` changes the interval; it counts completed exchanges, not individual
+`memory.stack.cadence` changes the interval; it counts completed exchanges, not individual
 messages, tool calls, or minutes. Pending exchanges are also processed at session end and
 before context compression, so a short session need not reach the normal cadence.
-`stack.json`'s `max_iterations` separately limits the saver agent's work; it does not change
+`memory.stack.max_iterations` separately limits the saver agent's work; it does not change
 when saving starts.
 
 Saving and summarising run on the background synchronization path. On a session switch, the
@@ -177,12 +177,12 @@ plugin falls back to the behaviour named in the last column.
 |-----|---------|--------|
 | `memory.provider` | `""` | Selects this provider. Must be `stack`; with `""` the plugin never loads and Hermes uses builtin memory alone. |
 | `stack.json` → `repo_path` | profile-local | Which store this profile reads and writes. Absent ⇒ `$HERMES_HOME/memories/stack`; an absolute path shares one store between profiles. Written into `HERMES_HOME`, so it is per profile. |
-| `stack.json` → `dataset_enabled` | `false` | When true, writes the local debug/dataset file (see Data and permissions). Off by default; it stores raw conversation turns. Set via `hermes memory setup`. |
+| `memory.stack.dataset_enabled` | `false` | When true, writes the local debug/dataset file (see Data and permissions). Off by default; it stores raw conversation turns. Set via `hermes memory setup`. |
 | `auxiliary.retriever.{provider,model,api_key,base_url}` | main model | Model for the per-turn recall call (one `PluginLlm` request over the page catalog). Needs the two trust flags below. |
 | `auxiliary.saver.{provider,model,api_key,base_url}` | main model | Model for the background curation agent — the hardest job here, so it is worth a strong one. It runs as its own agent rather than through `PluginLlm`, so it needs no trust flag. |
 | `auxiliary.summarizer.{…}` | main model | Model that compresses the rolling context the saver receives. Context only; never written to the store. Needs the same two trust flags as the retriever. |
-| `stack.json` → `cadence` | `4` | Exchanges between saver runs. Lower = more frequent, more tokens per session. Set via `hermes memory setup`. |
-| `stack.json` → `max_iterations` | `10` | Tool-call budget for one saver run. A session with four or more new facts can exhaust the default mid-write, leaving created-but-empty pages and no commit — raise it before blaming the saver. |
+| `memory.stack.cadence` | `4` | Exchanges between saver runs. Lower = more frequent, more tokens per session. Set via `hermes memory setup`. |
+| `memory.stack.max_iterations` | `10` | Tool-call budget for one saver run. A session with four or more new facts can exhaust the default mid-write, leaving created-but-empty pages and no commit — raise it before blaming the saver. |
 | `plugins.entries.stack.llm.allow_provider_override` | `false` | **Required for the retriever and summarizer.** Without it `PluginLlm` denies the request and raises; both callers swallow the error, so recall quietly returns nothing — indistinguishable from "no page was relevant" — and the summary freezes at its previous value. The saver is unaffected. |
 | `plugins.entries.stack.llm.allow_model_override` | `false` | The same gate for the model field specifically. Both must be true. |
 
@@ -203,11 +203,11 @@ hermes config set plugins.entries.stack.llm.allow_model_override true
 
 Config is read once at agent init, so **a new session is required** — `/reset` or restart.
 
-`cadence` and `max_iterations` are the provider's own settings, not `auxiliary` keys — set them
-through `hermes memory setup` (they land in `stack.json`). The remaining `auxiliary.*` dotted
-paths above work with `hermes config set`, but it warns they are not recognized config keys:
-they are read by this plugin, not by Hermes core. The warning is expected; the value is written
-and used.
+`cadence` and `max_iterations` are the provider's own settings — set them through
+`hermes memory setup`, and they land in `config.yaml` under `memory.stack` beside the activation
+key. The remaining `auxiliary.*` dotted paths above work with `hermes config set`, but it warns
+they are not recognized config keys: they are read by this plugin, not by Hermes core. The
+warning is expected; the value is written and used.
 
 Not read: the `timeout` field under any of the three `auxiliary.*` blocks. The plugin passes no
 timeout to either path, so setting it does nothing — the recall call can block for as long as the
@@ -265,9 +265,8 @@ one with no remote is legal.
   instructed to pull, commit, and push changed memory repositories using configured Git
   credentials and remotes. Configure those remotes for the intended audience; the plugin does
   not make a remote private or approve its contents for publication.
-- **Local diagnostics (opt-in):** when `dataset_enabled` is true in this profile's `stack.json`
-  (the same file as `repo_path`, set by `hermes memory setup`), the plugin writes
-  `$HERMES_HOME/memories/.stack-provider/dataset.jsonl` — a debug/dataset file holding
+- **Local diagnostics (opt-in):** when `memory.stack.dataset_enabled` is true, the plugin
+  writes `$HERMES_HOME/memories/.stack-provider/dataset.jsonl` — a debug/dataset file holding
   query excerpts, full raw conversation turns fed to the saver, rolling summaries, tool calls
   and their results, and project paths/commit references. It is off by default because it
   stores raw transcripts; it has no size cap or rotation. Treat it and probe logs as private
