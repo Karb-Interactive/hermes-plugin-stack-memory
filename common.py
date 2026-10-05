@@ -2,24 +2,9 @@
 
 import json
 import logging
-import os
-import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
-
-_PROBE_LOG = Path(__file__).parent / ".probe.log"
-_DEBUG = os.environ.get("STACK_PROVIDER_DEBUG") == "1"
-
-
-def _probe(event: str) -> None:
-    """Log a debug event to .probe.log (always on, like __init__.py's _probe)."""
-    try:
-        with open(_PROBE_LOG, "a", encoding="utf-8") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {event}\n")
-    except Exception:
-        pass
 
 
 def format_turns(turns: List[Dict[str, str]], max_chars: int = 2000) -> str:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.9"
-# dependencies = ["pyyaml"]
+# dependencies = ["pyyaml==6.0.2"]
 # ///
 """engine — the harness-neutral core for the memory/wiki system.
 
@@ -634,11 +634,6 @@ def cmd_create(argv):
         return _save_err("description required")
 
     content = args.content
-    if content.startswith("@"):
-        try:
-            content = Path(content[1:]).read_text(encoding="utf-8")
-        except Exception as e:
-            return _save_err(f"cannot read content file: {e}")
     if not content.strip():
         content = f"# {args.description}\n\n<!-- Add content via patch -->\n"
 
@@ -660,7 +655,10 @@ def cmd_create(argv):
 
     dir_arg = args.dir.strip().strip("/")
     if dir_arg:
-        target_dir = WIKI / dir_arg
+        wiki_root = WIKI.resolve()
+        target_dir = (WIKI / dir_arg).resolve()
+        if not target_dir.is_relative_to(wiki_root):
+            return _save_err(f"--dir must stay inside wiki/: {dir_arg}")
         must_exist = target_dir.parent if args.kind == "learning" else target_dir
         if not must_exist.is_dir():
             return _save_err(f"folder not found: wiki/{dir_arg} — must be an existing folder")

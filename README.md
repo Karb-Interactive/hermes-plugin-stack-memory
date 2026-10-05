@@ -264,10 +264,13 @@ one with no remote is legal.
   instructed to pull, commit, and push changed memory repositories using configured Git
   credentials and remotes. Configure those remotes for the intended audience; the plugin does
   not make a remote private or approve its contents for publication.
-- **Local diagnostics:** `$HERMES_HOME/memories/.stack-provider/dataset.jsonl` records query
-  excerpts, raw buffered exchanges, rolling summaries, tool traces, and project paths/commit
-  references. Treat it and probe logs as private conversation data. Stack does not upload
-  those logs to a separate analytics service or include an outbound telemetry endpoint.
+- **Local diagnostics (opt-in):** when `auxiliary.dataset.enabled: true` is set, the plugin
+  writes `$HERMES_HOME/memories/.stack-provider/dataset.jsonl` — a debug/dataset file holding
+  query excerpts, full raw conversation turns fed to the saver, rolling summaries, tool calls
+  and their results, and project paths/commit references. It is off by default because it
+  stores raw transcripts; it has no size cap or rotation. Treat it and probe logs as private
+  conversation data. Stack does not upload those logs to a separate analytics service or
+  include an outbound telemetry endpoint.
 - **Credentials and background work:** model credentials are resolved from Hermes's configured
   runtime; Git uses the user's existing authentication. Stack does not provide a separate
   credential store. Saving and summarising run on Hermes's background worker, not as a separate

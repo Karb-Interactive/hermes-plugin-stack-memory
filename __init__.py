@@ -145,8 +145,10 @@ class StackMemoryProvider(MemoryProvider):
         self._retriever: Optional[Any] = None  # per-turn page selection (one LLM call)
         self._injected_history: List[Set[str]] = []  # pages injected in the last 3 turns (no re-injection)
         self._saver: Optional[Any] = None     # background curation agent (the only writer)
+        self._saver_lock = threading.Lock()   # serialize saver runs (cadence vs pre-compress flush)
         self._summarizer: Optional[Any] = None  # rolling context for the saver
         self._turn_buffer: List[Dict[str, str]] = []
+        self._turn_buffer_lock = threading.Lock()
         self._turn_count = 0
         self._rolling_summary = ""
         _probe(f"__init__ repo={self._repo}")
@@ -340,14 +342,19 @@ class StackMemoryProvider(MemoryProvider):
         # and disables the provider, rather than running half-initialized and
         # silently dropping retrieval or curation.
 
-        # Dataset logger — records retriever/saver decisions for inspection.
+        # Dataset (opt-in) — records retriever/saver runs, including raw turns and
+        # tool traces, for debugging and study. Off unless explicitly enabled:
+        # it is a debug/dataset artefact, not a log, and holds full transcripts.
         # Runtime state belongs to the profile, never the plugin checkout:
         # writing it here would share one file across profiles sharing this
         # install, and dirty the installed source.
-        from .dataset import DatasetLogger
-        _state_dir = Path(self._hermes_home or os.path.expanduser("~/.hermes"))
-        self._dataset = DatasetLogger(_state_dir / "memories" / ".stack-provider" / "dataset.jsonl",
-                                      self._repo)
+        self._dataset = None
+        if self._resolve_aux_bool("dataset", "enabled", default=False):
+            from .dataset import DatasetLogger
+            _state_dir = Path(self._hermes_home or os.path.expanduser("~/.hermes"))
+            self._dataset = DatasetLogger(
+                _state_dir / "memories" / ".stack-provider" / "dataset.jsonl", self._repo
+            )
         # Retriever: per-turn page selection (one PluginLlm call).
         self._retriever = None
         self._injected_history = []
@@ -364,7 +371,7 @@ class StackMemoryProvider(MemoryProvider):
         # Saver: background curation agent (the only writer).
         from .saver import Saver
         self._saver = None
-        self._turn_buffer = []
+        self._clear_turns()
         self._turn_count = 0
         self._rolling_summary = ""
         self._saver_cadence = self._resolve_aux_positive_int(
@@ -501,99 +508,114 @@ class StackMemoryProvider(MemoryProvider):
         if not self._saver or self._agent_context != "primary":
             return
         self._turn_count += 1
-        self._turn_buffer.append({"role": "user", "content": user_content})
-        self._turn_buffer.append({"role": "assistant", "content": assistant_content})
+        with self._turn_buffer_lock:
+            self._turn_buffer.append({"role": "user", "content": user_content})
+            self._turn_buffer.append({"role": "assistant", "content": assistant_content})
         # Cadence check
         if self._turn_count % self._saver_cadence == 0:
             self._run_saver(session_id or self._session_id, trigger=f"cadence_{self._saver_cadence}")
 
-    def _run_saver(self, session_id: str, trigger: str) -> None:
+    def _take_turns(self) -> List[Dict[str, str]]:
+        with self._turn_buffer_lock:
+            turns, self._turn_buffer = self._turn_buffer, []
+        return turns
+
+    def _clear_turns(self) -> None:
+        with self._turn_buffer_lock:
+            self._turn_buffer = []
+
+    def _has_turns(self) -> bool:
+        with self._turn_buffer_lock:
+            return bool(self._turn_buffer)
+
+    def _run_saver(self, session_id: str, trigger: str, turns: Optional[List[Dict[str, str]]] = None) -> None:
         """Spawn the saver agent with accumulated turns."""
-        if not self._saver or not self._turn_buffer:
+        if not self._saver:
             return
-        turns = list(self._turn_buffer)
-        try:
-            result = self._saver.extract_and_save(turns, self._rolling_summary)
-            if isinstance(result, tuple):
-                saved, saver_trace, reasoning = result
-            else:
-                saved, saver_trace, reasoning = result, [], ""
-            
-            # Log ALL runs to dataset (including failures/empty) so problems are visible
-            if self._dataset:
-                turn_nums = list(range(self._turn_count - len(turns) // 2 + 1, self._turn_count + 1))
-                status = "saved" if saved else "nothing_to_save"
-                self._dataset.log_saver(
-                    session_id=session_id,
-                    trigger=trigger,
-                    turns_covered=turn_nums,
-                    extracted=saved,
-                    trace=saver_trace,
-                    reasoning=reasoning,
-                    status=status,
-                    input_turns=turns,
-                    rolling_summary=self._rolling_summary,
-                )
+        if turns is None:
+            turns = self._take_turns()
+        if not turns:
+            return
 
-            # Notify the user what was saved (same channel as background_review)
-            if self._notify and saved:
-                names = []
-                for s in saved[:5]:
-                    page = s.get("page_written") or s.get("name") or "?"
-                    names.append(page.split("/")[-1].replace(".md", ""))
-                self._notify(f"📝 Memory: saved {len(saved)} page(s): {', '.join(names)}")
-        except Exception as e:
-            logger.warning("Saver run failed: %s", e)
-            if self._dataset:
-                self._dataset.log_saver(
-                    session_id=session_id,
-                    trigger=trigger,
-                    turns_covered=[],
-                    extracted=[],
-                    trace=[],
-                    reasoning="",
-                    status="error",
-                    error=str(e),
-                    input_turns=turns,
-                    rolling_summary=self._rolling_summary,
-                )
-        finally:
-            # Update the rolling summary after the saver runs.
-            if self._summarizer and turns:
-                try:
-                    self._rolling_summary = self._summarizer.update(self._rolling_summary, turns)
-                except Exception as e:
-                    logger.debug("Summarizer update failed: %s", e)
-            self._turn_buffer = []  # reset buffer after each run
+        with self._saver_lock:
+            try:
+                result = self._saver.extract_and_save(turns, self._rolling_summary)
+                if isinstance(result, tuple):
+                    saved, saver_trace, reasoning = result
+                else:
+                    saved, saver_trace, reasoning = result, [], ""
 
-    def on_pre_compress(self, messages) -> None:
+                # Log ALL runs to dataset (including failures/empty) so problems are visible
+                if self._dataset:
+                    turn_nums = list(range(self._turn_count - len(turns) // 2 + 1, self._turn_count + 1))
+                    status = "saved" if saved else "nothing_to_save"
+                    self._dataset.log_saver(
+                        session_id=session_id,
+                        trigger=trigger,
+                        turns_covered=turn_nums,
+                        extracted=saved,
+                        trace=saver_trace,
+                        reasoning=reasoning,
+                        status=status,
+                        input_turns=turns,
+                        rolling_summary=self._rolling_summary,
+                    )
+                # Notify the user what was saved (same channel as background_review)
+                if self._notify and saved:
+                    names = []
+                    for s in saved[:5]:
+                        page = s.get("page_written") or s.get("name") or "?"
+                        names.append(page.split("/")[-1].replace(".md", ""))
+                    self._notify(f"📝 Memory: saved {len(saved)} page(s): {', '.join(names)}")
+            except Exception as e:
+                logger.warning("Saver run failed: %s", e)
+                if self._dataset:
+                    self._dataset.log_saver(
+                        session_id=session_id,
+                        trigger=trigger,
+                        turns_covered=[],
+                        extracted=[],
+                        trace=[],
+                        reasoning="",
+                        status="error",
+                        error=str(e),
+                        input_turns=turns,
+                        rolling_summary=self._rolling_summary,
+                    )
+            finally:
+                # Update the rolling summary after the saver runs.
+                if self._summarizer and turns:
+                    try:
+                        self._rolling_summary = self._summarizer.update(self._rolling_summary, turns)
+                    except Exception as e:
+                        logger.debug("Summarizer update failed: %s", e)
+
+    def on_pre_compress(self, _messages) -> str:
         """Fire saver before context is discarded."""
         if not self._saver or self._agent_context != "primary":
-            return
-        # Convert messages to the format the saver expects
-        turns = []
-        for m in (messages or []):
-            if isinstance(m, dict):
-                role = m.get("role", "")
-                content = m.get("content", "")
-                if isinstance(content, list):
-                    content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
-                if role in ("user", "assistant") and content:
-                    turns.append({"role": role, "content": str(content)})
-        if turns:
-            self._run_saver(self._session_id, trigger="on_pre_compress")
+            return ""
+        turns = self._take_turns()
+        if not turns:
+            return ""
+        from agent.memory_provider import spawn_context_thread
+        spawn_context_thread(
+            lambda: self._run_saver(self._session_id, "on_pre_compress", turns),
+            name="stack-saver-precompress",
+        ).start()
+        return ""
 
     def on_session_end(self, messages) -> None:
         """Flush a short session that ended before the normal saver cadence."""
-        if not self._saver or self._agent_context != "primary" or not self._turn_buffer:
+        if not self._saver or self._agent_context != "primary" or not self._has_turns():
             return
         self._run_saver(self._session_id, trigger="on_session_end")
 
     def on_session_switch(self, new_session_id: str, *, reset: bool = False, **kwargs) -> None:
         """Reset accumulated turn buffer + rolling summary + injection history on session switch."""
-        self._turn_buffer = []
+        if reset:
+            self._clear_turns()
+            self._rolling_summary = ""
         self._turn_count = 0
-        self._rolling_summary = ""
         self._injected_history = []
 
     def _run_stack(self, sub_args: List[str], timeout: int) -> str:
@@ -731,6 +753,26 @@ class StackMemoryProvider(MemoryProvider):
             value = task.get(field)
             if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
                 return int(value)
+        except Exception:
+            pass
+        return default
+
+    @staticmethod
+    def _resolve_aux_bool(config_key: str, field: str, *, default: bool) -> bool:
+        """Read a boolean from ``auxiliary.<config_key>.<field>``.
+
+        The dataset is a debug/dataset artefact that stores raw conversation
+        turns on disk, so it is opt-in: unset -> ``default`` (off). Only an
+        explicit boolean in the config turns it on; anything else is ignored.
+        """
+        try:
+            from hermes_cli.config import load_config
+            cfg = load_config()
+            aux = cfg.get("auxiliary", {}) if isinstance(cfg.get("auxiliary"), dict) else {}
+            task = aux.get(config_key, {}) if isinstance(aux.get(config_key), dict) else {}
+            value = task.get(field)
+            if isinstance(value, bool):
+                return value
         except Exception:
             pass
         return default

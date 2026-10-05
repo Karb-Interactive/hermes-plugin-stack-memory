@@ -1,10 +1,19 @@
-"""Append-only JSONL logger for the stack memory plugin.
+"""Append-only JSONL dataset of the stack memory plugin's retriever and saver runs.
 
-Records what the retriever and saver decided each turn, as lean metadata +
-references (NOT content): every entry carries session_id + wiki_sha (+ the
-project repo sha when cwd is a project), so any decision can be reconstructed
-later by checking out the wiki at that sha. Standalone so it can be tested on
-its own; the plugin just calls log_retriever() / log_saver().
+Retriever records hold lean metadata (the query, chosen/injected pages, reasoning).
+Saver records are the FULL record of a curation run: the raw input turns fed to the
+saver, the rolling summary, every tool call and its result, and what was written.
+
+Full turns and tool traces are stored on purpose — this is a DEBUG + DATASET
+artefact (to understand how the saver behaves, and to study it later), not a
+compact log. It therefore has NO size cap or rotation; it is opt-in
+(``auxiliary.dataset.enabled``, default off) and lives in the profile's state
+directory, never in the plugin checkout. It is local-only and not uploaded
+anywhere; anyone who turns it on should expect raw transcripts on disk and
+manage the file themselves.
+
+Standalone so it can be tested on its own; the plugin calls log_retriever() /
+log_saver().
 """
 
 import json
@@ -15,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 
 class DatasetLogger:
-    """Append-only JSONL logger for retriever + saver decisions (metadata, not content)."""
+    """Append-only JSONL dataset writer for retriever + saver runs (full traces + raw turns)."""
 
     def __init__(self, log_path: Path, wiki_repo: Path):
         self._log_path = log_path
