@@ -420,13 +420,11 @@ class StackMemoryProvider(MemoryProvider):
         self._injected_history = []
         if self._agent_context == "primary":
             from .retriever import Retriever
-            provider, model, *_ = self._resolve_aux_runtime("retriever")
             catalog = self._build_catalog()
             self._retriever = Retriever(
                 wiki_path=self._wiki_dir(),
                 catalog=catalog,
-                provider=provider,
-                model=model,
+                task="retriever",
             )
         # Saver: background curation agent (the only writer).
         from .saver import Saver
@@ -457,10 +455,7 @@ class StackMemoryProvider(MemoryProvider):
         self._summarizer = None
         if self._agent_context == "primary":
             from .summarizer import Summarizer
-            provider, model, *_ = self._resolve_aux_runtime("summarizer")
-            self._summarizer = Summarizer(
-                provider=provider, model=model,
-            )
+            self._summarizer = Summarizer(task="summarizer")
         # Shared-submodule freshness: gateway-free background pull at session start.
         self._pull_submodules_async()
         _probe(f"initialize block_chars={len(self._prompt_block)}")
@@ -826,4 +821,13 @@ class StackMemoryProvider(MemoryProvider):
 def register(ctx) -> None:
     """Preferred load path: the loader calls register() with a collector ctx."""
     _probe("register CALLED")
+    for key, display, desc in (
+        ("retriever", "Stack recall", "Stack — per-turn page selection"),
+        ("saver", "Stack saver", "Stack — background curation agent"),
+        ("summarizer", "Stack summarizer", "Stack — rolling context compression"),
+    ):
+        try:
+            ctx.register_auxiliary_task(key, display_name=display, description=desc)
+        except Exception as e:
+            _probe(f"register_auxiliary_task {key} failed: {e}")
     ctx.register_memory_provider(StackMemoryProvider())

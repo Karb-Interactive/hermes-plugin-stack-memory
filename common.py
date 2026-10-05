@@ -27,6 +27,7 @@ def call_llm(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     messages: Optional[List[Dict[str, str]]] = None,
+    task: Optional[str] = None,
 ) -> str:
     """Make a single PluginLlm call. Returns response text or empty string.
 
@@ -34,6 +35,9 @@ def call_llm(
 
     If *messages* is provided, it is sent as-is (system + user format).
     Otherwise, *prompt* is sent as a single user message.
+
+    *task* routes provider/model through the plugin-registered ``auxiliary.<task>``
+    slot (no override flags needed); explicit *provider*/*model* still win if set.
 
     Returns "" if PluginLlm is not importable (running outside Hermes).
     Raises on LLM call failure — callers catch as needed.
@@ -48,6 +52,8 @@ def call_llm(
     if messages is None:
         messages = [{"role": "user", "content": prompt}]
     kwargs = {}
+    if task:
+        kwargs["task"] = task
     if provider:
         kwargs["provider"] = provider
     if model:

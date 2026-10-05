@@ -42,11 +42,9 @@ class Summarizer:
     
     def __init__(
         self,
-        provider: str = None,
-        model: str = None,
+        task: Optional[str] = None,
     ):
-        self._provider = provider
-        self._model = model
+        self._task = task
     
     def update(
         self,
@@ -73,7 +71,7 @@ class Summarizer:
         )
         
         try:
-            result = call_llm(prompt, self._provider, self._model)
+            result = call_llm(prompt, task=self._task)
             if result and len(result) > _SUMMARY_MAX:
                 result = result[:_SUMMARY_MAX]
             return result or prev_summary  # fall back to prev on empty result

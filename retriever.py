@@ -31,13 +31,11 @@ class Retriever:
         self,
         wiki_path: Path,
         catalog: str,
-        provider: str = None,
-        model: str = None,
+        task: Optional[str] = None,
     ):
         self._wiki_path = wiki_path
         self._catalog = catalog
-        self._provider = provider
-        self._model = model
+        self._task = task
     
     def retrieve(
         self,
@@ -74,9 +72,7 @@ class Retriever:
         ]
         
         try:
-            response_text = call_llm(
-                messages=messages, provider=self._provider, model=self._model
-            )
+            response_text = call_llm(messages=messages, task=self._task)
             paths = parse_path_response(response_text, max_pages=_MAX_PAGES)
             
             # Filter out recently injected

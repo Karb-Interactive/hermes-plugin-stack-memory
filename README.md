@@ -44,9 +44,10 @@ initial commit.
 | **Retriever** | The current user message, a catalog of page paths and descriptions, and the paths injected during the last three turns. | Up to three relevant page paths. The plugin reads those pages from disk and supplies their bodies to the main agent before it answers. The retriever does not receive the rolling summary or the full conversation. |
 | **Summariser** | The previous rolling summary and excerpts of the exchanges just processed by the saver. | An updated session summary, capped at 5,000 characters, for the next saver run. It is working context, not a wiki page. |
 
-Each component can use its own model through `auxiliary.saver`, `auxiliary.retriever`, or
-`auxiliary.summarizer`. The saver is an agent that can use tools; the retriever and summariser
-are single model calls without tools.
+Each component can use its own model through `auxiliary.retriever`, `auxiliary.saver`, or
+`auxiliary.summarizer` — the plugin registers these three as auxiliary tasks, so the settings
+are first-class and need no override flags. The saver is an agent that can use tools; the
+retriever and summariser are single model calls without tools.
 
 ## Logic and cadence
 
@@ -178,13 +179,11 @@ plugin falls back to the behaviour named in the last column.
 | `memory.provider` | `""` | Selects this provider. Must be `stack`; with `""` the plugin never loads and Hermes uses builtin memory alone. |
 | `stack.json` → `repo_path` | profile-local | Which store this profile reads and writes. Absent ⇒ `$HERMES_HOME/memories/stack`; an absolute path shares one store between profiles. Written into `HERMES_HOME`, so it is per profile. |
 | `memory.stack.dataset_enabled` | `false` | When true, writes the local debug/dataset file (see Data and permissions). Off by default; it stores raw conversation turns. Set via `hermes memory setup`. |
-| `auxiliary.retriever.{provider,model,api_key,base_url}` | main model | Model for the per-turn recall call (one `PluginLlm` request over the page catalog). Needs the two trust flags below. |
-| `auxiliary.saver.{provider,model,api_key,base_url}` | main model | Model for the background curation agent — the hardest job here, so it is worth a strong one. It runs as its own agent rather than through `PluginLlm`, so it needs no trust flag. |
-| `auxiliary.summarizer.{…}` | main model | Model that compresses the rolling context the saver receives. Context only; never written to the store. Needs the same two trust flags as the retriever. |
+| `auxiliary.retriever.{provider,model,api_key,base_url}` | main model | Model for the per-turn recall call (one `PluginLlm` request over the page catalog), via the plugin-registered `retriever` slot. No trust flag needed. |
+| `auxiliary.saver.{provider,model,api_key,base_url}` | main model | Model for the background curation agent — the hardest job here, so it is worth a strong one. It runs as its own `AIAgent`, not through `PluginLlm`. |
+| `auxiliary.summarizer.{…}` | main model | Model that compresses the rolling context the saver receives, via the `summarizer` slot. Context only; never written to the store. No trust flag needed. |
 | `memory.stack.cadence` | `4` | Exchanges between saver runs. Lower = more frequent, more tokens per session. Set via `hermes memory setup`. |
 | `memory.stack.max_iterations` | `10` | Tool-call budget for one saver run. A session with four or more new facts can exhaust the default mid-write, leaving created-but-empty pages and no commit — raise it before blaming the saver. |
-| `plugins.entries.stack.llm.allow_provider_override` | `false` | **Required for the retriever and summarizer.** Without it `PluginLlm` denies the request and raises; both callers swallow the error, so recall quietly returns nothing — indistinguishable from "no page was relevant" — and the summary freezes at its previous value. The saver is unaffected. |
-| `plugins.entries.stack.llm.allow_model_override` | `false` | The same gate for the model field specifically. Both must be true. |
 
 ```sh
 hermes config set memory.provider stack
@@ -194,11 +193,6 @@ hermes config set auxiliary.retriever.provider ollama-cloud
 hermes config set auxiliary.retriever.model nemotron-3-super
 hermes config set auxiliary.saver.provider ollama-cloud
 hermes config set auxiliary.saver.model glm-5.3-flash
-
-# without these two, the retriever and summarizer settings above are ignored
-# (the saver does not go through PluginLlm, so it needs no flag)
-hermes config set plugins.entries.stack.llm.allow_provider_override true
-hermes config set plugins.entries.stack.llm.allow_model_override true
 ```
 
 Config is read once at agent init, so **a new session is required** — `/reset` or restart.
